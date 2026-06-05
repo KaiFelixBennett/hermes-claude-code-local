@@ -1,9 +1,19 @@
+[CmdletBinding()]
+param(
+    [string]$ConfigPath
+)
+
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSCommandPath
-$configPath = Join-Path $repoRoot 'hermes_config.yaml'
+
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $configPath = Join-Path $repoRoot 'hermes_config.yaml'
+} else {
+    $configPath = $ConfigPath
+}
+
 $llamaToolsRoot = Join-Path $repoRoot 'tools\llama.cpp'
-$chatTemplatePath = Join-Path $repoRoot 'tools\llama.cpp\templates\Qwen3.5-4B.jinja'
 
 function Get-HermesModelConfigValue {
     param(
@@ -45,6 +55,8 @@ function Get-HermesModelConfigValue {
 
     return $null
 }
+
+$chatTemplateFromConfig = Get-HermesModelConfigValue -Key 'chat_template'
 
 function Get-FirstNonEmptyValue {
     param(
@@ -156,7 +168,10 @@ $modelPath = Get-FirstNonEmptyValue -Values @(
     $env:HERMES_LLAMACPP_MODEL_PATH,
     (Get-HermesModelConfigValue -Key 'path')
 )
-$parallelSlots = '1'
+$parallelSlots = Get-FirstNonEmptyValue -Values @(
+    (Get-HermesModelConfigValue -Key 'parallel_slots'),
+    '1'
+)
 $flashAttention = 'on'
 $reasoningMode = 'off'
 $reasoningBudget = '2048'
@@ -164,6 +179,16 @@ $reasoningBudgetMessage = 'Reasoning budget exhausted. Provide the best possible
 $modelAlias = Get-HermesModelConfigValue -Key 'default'
 $baseUrl = Get-HermesModelConfigValue -Key 'base_url'
 $contextLength = Get-HermesModelConfigValue -Key 'context_length'
+$batchSize = Get-FirstNonEmptyValue -Values @(
+    (Get-HermesModelConfigValue -Key 'batch_size'),
+    '512'
+)
+$ubatchSize = Get-FirstNonEmptyValue -Values @(
+    (Get-HermesModelConfigValue -Key 'ubatch_size'),
+    '512'
+)
+$cacheTypeK = Get-HermesModelConfigValue -Key 'cache_type_k'
+$cacheTypeV = Get-HermesModelConfigValue -Key 'cache_type_v'
 $temperature = Get-HermesModelConfigValue -Key 'temperature'
 $topP = Get-HermesModelConfigValue -Key 'top_p'
 $topK = Get-HermesModelConfigValue -Key 'top_k'
@@ -220,7 +245,7 @@ if (-not (Test-Path $modelPath)) {
     throw "GGUF model not found: $modelPath"
 }
 
-if (-not (Test-Path $chatTemplatePath)) {
+if ($chatTemplatePath -and -not (Test-Path $chatTemplatePath)) {
     throw "Chat template not found: $chatTemplatePath"
 }
 
@@ -233,14 +258,35 @@ $arguments = @(
     '--model', $modelPath,
     '--alias', $modelAlias,
     '--ctx-size', "$contextLength",
-    '--chat-template-file', $chatTemplatePath,
-    '--parallel', $parallelSlots,
+    '--parallel', "$parallelSlots",
     '--flash-attn', $flashAttention,
     '--cache-reuse', '1024',
     '--kv-unified',              # Enables effective cache reuse.
     '--reasoning', $reasoningMode,
     '--jinja'
 )
+
+# Batch sizes for ROCm/HIP optimization
+if (-not [string]::IsNullOrWhiteSpace($batchSize)) {
+    $arguments += @('--batch-size', "$batchSize")
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ubatchSize)) {
+    $arguments += @('--ubatch-size', "$ubatchSize")
+}
+
+# KV-cache quantization for VRAM savings (essential for Gemma-4 on 24GB)
+if (-not [string]::IsNullOrWhiteSpace($cacheTypeK)) {
+    $arguments += @('--cache-type-k', "$cacheTypeK")
+}
+
+if (-not [string]::IsNullOrWhiteSpace($cacheTypeV)) {
+    $arguments += @('--cache-type-v', "$cacheTypeV")
+}
+
+if ($chatTemplatePath) {
+    $arguments += @('--chat-template-file', $chatTemplatePath)
+}
 
 if (-not [string]::IsNullOrWhiteSpace($temperature)) {
     $arguments += @('--temp', "$temperature")
@@ -305,6 +351,18 @@ Write-Host ("Ctx    : {0}" -f $contextLength)
 Write-Host ("Tpl    : {0}" -f $chatTemplatePath)
 Write-Host ("Slots  : {0}" -f $parallelSlots)
 Write-Host ("Flash  : {0}" -f $flashAttention)
+if (-not [string]::IsNullOrWhiteSpace($batchSize)) {
+    Write-Host ("Batch  : {0}" -f $batchSize)
+}
+if (-not [string]::IsNullOrWhiteSpace($ubatchSize)) {
+    Write-Host ("UBatch : {0}" -f $ubatchSize)
+}
+if (-not [string]::IsNullOrWhiteSpace($cacheTypeK)) {
+    Write-Host ("CacheK : {0}" -f $cacheTypeK)
+}
+if (-not [string]::IsNullOrWhiteSpace($cacheTypeV)) {
+    Write-Host ("CacheV : {0}" -f $cacheTypeV)
+}
 if (
     -not [string]::IsNullOrWhiteSpace($temperature) -or
     -not [string]::IsNullOrWhiteSpace($topP) -or

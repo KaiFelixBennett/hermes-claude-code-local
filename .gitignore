@@ -38,3 +38,4 @@ benchmark_results/20260524T172753Z-local-agent-feasibility-correction.md
 benchmark_results/20260524T175919Z-local-coding-evaluation-report.json
 benchmark_results/20260524T175919Z-local-coding-evaluation-report.md
 benchmarks/run_hermes_claude_benchmark.py
+backups/*

@@ -133,23 +133,26 @@ Why:
 - local measurements showed that turning MTP off roughly halved decode speed in the tested setup
 - MTP was the main reason the Q8 run stayed close to the faster local decode profile
 
-### When MTP is less useful
+### When MTP actively hurts performance
 
-MTP is less useful when:
+MTP significantly worsens prefill latency. Measured on this machine at ~13k prompt tokens:
 
-- the workload is dominated by huge retained prompt context
-- Hermes sessions have very large tool output history or long coding transcripts
+- **MTP on: 16.4s prefill**
+- **MTP off: 2.9s prefill** (5.7× faster)
+
+MTP is therefore a net negative when:
+
+- the workload is prompt-heavy (large retained context, long coding transcripts, big tool output history)
+- sessions accumulate context over time (agentic coding loops)
 - prefill latency, not decode latency, is the user-visible bottleneck
 
-Why:
-
-- MTP does not materially fix prefill
-- for large-prompt coding sessions, reducing retained context was a larger win than toggling MTP
+At context sizes above ~64k, the prefill penalty from MTP dominates completely. MTP does not fix prefill — it makes it meaningfully worse.
 
 ### Current recommendation
 
-- Default: MTP on
-- Re-evaluate MTP only if you switch to a workload dominated by short generations after enormous prompts, or if backend stability demands a fallback
+- **Coding / agentic sessions (growing context):** MTP off, Flash Attention on, context ~64k
+- **Generative tasks (long outputs, small prompt):** MTP on — the ~2× decode advantage is real
+- Do not default MTP on for mixed or prompt-heavy workloads
 
 ## Quantization Notes
 
