@@ -1,0 +1,3 @@
+# Ensure shell scripts always use LF line endings on checkout
+# This prevents CRLF issues when running on Linux/macOS
+*.sh text eol=lf

@@ -20,6 +20,8 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 ###############################################################################
 # Detect platform
 ###############################################################################
+IS_LINUX=0
+IS_MACOS=0
 PLATFORM="$(uname -s)"
 case "$PLATFORM" in
     Linux)   IS_LINUX=1 ;;
@@ -27,7 +29,11 @@ case "$PLATFORM" in
     *)       error "Unsupported platform: $PLATFORM"; exit 1 ;;
 esac
 
-info "Detected platform: ${PLATFORM}"
+# Portable sed -i: macOS requires -i '' while Linux uses -i
+SED_INPLACE="sed -i"
+if [ "$IS_MACOS" = "1" ]; then
+    SED_INPLACE="sed -i ''"
+fi
 
 ###############################################################################
 # Check prerequisites
@@ -45,7 +51,12 @@ check_prerequisites() {
 
     if [ "$TOTAL_RAM_GB" -lt 16 ]; then
         warn "You have ${TOTAL_RAM_GB} GB RAM. 16 GB minimum recommended (32 GB for best experience)."
-        read -p "Continue anyway? [y/N] " -r
+        # Read from /dev/tty to work when piped (curl | bash)
+        if [ -t 0 ]; then
+            read -p "Continue anyway? [y/N] " -r REPLY
+        else
+            read -p "Continue anyway? [y/N] " -r REPLY < /dev/tty
+        fi
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             error "Aborted by user."; exit 1
         fi
@@ -54,8 +65,13 @@ check_prerequisites() {
     fi
 
     # Disk space check
-    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    AVAIL_DISK=$(df -BG "$REPO_DIR" | awk 'NR==2 {print $4}' | tr -d 'G')
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
+    if [ "$IS_LINUX" = "1" ]; then
+        AVAIL_DISK=$(df -BG "$REPO_DIR" | awk 'NR==2 {print $4}' | tr -d 'G')
+    else
+        # macOS df doesn't support -BG, use -g instead
+        AVAIL_DISK=$(df -g "$REPO_DIR" | awk 'NR==2 {print $4}')
+    fi
     if [ "$AVAIL_DISK" -lt 10 ]; then
         warn "Available disk space: ${AVAIL_DISK} GB. At least 10 GB recommended."
     else
@@ -93,12 +109,54 @@ install_hermes() {
     fi
 
     info "Installing Hermes Agent via pip..."
-    $PYTHON_CMD -m pip install --upgrade hermes-agent
-    if [ $? -eq 0 ]; then
-        success "Hermes Agent installed successfully"
+    
+    # On Linux, always use a virtual environment to avoid PEP 668 conflicts
+    # with system-managed packages (e.g. typing_extensions owned by Debian/Ubuntu)
+    if [ "$IS_LINUX" = "1" ]; then
+        VENV_DIR="${HOME}/.hermes/venv"
+        if [ ! -f "$VENV_DIR/bin/hermes" ]; then
+            info "Creating isolated virtual environment for Hermes..."
+            mkdir -p "${HOME}/.hermes"
+            if ! $PYTHON_CMD -m venv "$VENV_DIR" 2>/dev/null; then
+                # python3-venv may not be installed on minimal systems
+                if command -v apt-get &>/dev/null; then
+                    info "Installing python3-venv package..."
+                    sudo apt-get update -qq && sudo apt-get install -y python3-venv
+                    $PYTHON_CMD -m venv "$VENV_DIR"
+                else
+                    error "python3-venv is required but not available. Install it with: sudo apt install python3-venv"
+                    exit 1
+                fi
+            fi
+            "$VENV_DIR/bin/pip" install --upgrade pip
+        fi
+        if "$VENV_DIR/bin/pip" install --upgrade hermes-agent; then
+            success "Hermes Agent installed successfully"
+        else
+            error "Failed to install Hermes Agent"
+            exit 1
+        fi
+        
+        # Create symlink so hermes is available in PATH
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$VENV_DIR/bin/hermes" "$HOME/.local/bin/hermes"
+        
+        # Add to PATH if not already there
+        if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+            info "Adding ~/.local/bin to PATH (persisted to shell config)"
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+            # Also add to .profile for login shells
+            grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.profile" 2>/dev/null || \
+                echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
     else
-        error "Failed to install Hermes Agent"
-        exit 1
+        if $PYTHON_CMD -m pip install --upgrade hermes-agent; then
+            success "Hermes Agent installed successfully"
+        else
+            error "Failed to install Hermes Agent"
+            exit 1
+        fi
     fi
 }
 
@@ -127,11 +185,15 @@ configure_model() {
         return 0
     fi
 
-    # Ask user for model path
+    # Ask user for model path (read from /dev/tty for piped execution)
     echo ""
     info "Please provide the path to your GGUF model file:"
     echo "   (Press Enter to download a default model instead)"
-    read -p "Model path: " -r MODEL_PATH
+    if [ -t 0 ]; then
+        read -p "Model path: " -r MODEL_PATH
+    else
+        read -p "Model path: " -r MODEL_PATH < /dev/tty
+    fi
 
     if [ -z "$MODEL_PATH" ]; then
         # Download default model
@@ -163,9 +225,9 @@ configure_model() {
 
     # Update config with new path
     if grep -q '^\s*path:' "$CONFIG_FILE"; then
-        sed -i "s|^\s*path:.*|  path: '${MODEL_PATH}'|" "$CONFIG_FILE"
+        $SED_INPLACE "s|^\s*path:.*|  path: '${MODEL_PATH}'|" "$CONFIG_FILE"
     else
-        sed -i '/^model:/a\  path: '"'"'${MODEL_PATH}'"'"'' "$CONFIG_FILE"
+        $SED_INPLACE '/^model:/a\  path: '"'"'${MODEL_PATH}'"'"'' "$CONFIG_FILE"
     fi
     success "Model path updated in hermes_config.yaml"
 }
@@ -189,7 +251,7 @@ detect_backend() {
         BACKEND="cuda"
         success "NVIDIA GPU detected, using CUDA backend"
     # Check for AMD GPU (Linux)
-    elif [ -d "/dev/kfd" ] || lsmod | grep -q amdgpu 2>/dev/null; then
+    elif [ "$IS_LINUX" = "1" ] && { [ -d "/dev/kfd" ] || lsmod 2>/dev/null | grep -q amdgpu; }; then
         BACKEND="hip"
         success "AMD GPU detected, using HIP backend"
     else
@@ -199,9 +261,9 @@ detect_backend() {
 
     # Update config
     if grep -q '^\s*backend:' "$CONFIG_FILE"; then
-        sed -i "s|^\s*backend:.*|  backend: '${BACKEND}'|" "$CONFIG_FILE"
+        $SED_INPLACE "s|^\s*backend:.*|  backend: '${BACKEND}'|" "$CONFIG_FILE"
     else
-        sed -i '/^model:/a\  backend: '"'"'${BACKEND}'"'"'' "$CONFIG_FILE"
+        $SED_INPLACE '/^model:/a\  backend: '"'"'${BACKEND}'"'"'' "$CONFIG_FILE"
     fi
 }
 
@@ -228,9 +290,13 @@ install_llamacpp() {
         fi
     fi
 
-    # Fall back to pip installation
+    # Fall back to pip installation (use venv on Linux to avoid PEP 668)
     info "Installing llama.cpp via pip..."
-    $PYTHON_CMD -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    if [ "$IS_LINUX" = "1" ] && [ -d "${HOME}/.hermes/venv" ]; then
+        "${HOME}/.hermes/venv/bin/pip" install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    else
+        $PYTHON_CMD -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    fi
     success "llama.cpp installed"
 }
 
@@ -289,7 +355,7 @@ start_services() {
 # Main
 ###############################################################################
 main() {
-    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 
     echo ""
     echo "╔══════════════════════════════════════════╗"
