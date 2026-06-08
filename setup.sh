@@ -95,11 +95,32 @@ install_hermes() {
     fi
 
     info "Installing Hermes Agent via pip..."
-    PIP_OPTS=""
+    
+    # On Linux, always use a virtual environment to avoid PEP 668 conflicts
+    # with system-managed packages (e.g. typing_extensions owned by Debian/Ubuntu)
     if [ "$IS_LINUX" = "1" ]; then
-        PIP_OPTS="--break-system-packages --ignore-installed"
+        VENV_DIR="${HOME}/.hermes/venv"
+        if [ ! -f "$VENV_DIR/bin/hermes" ]; then
+            info "Creating isolated virtual environment for Hermes..."
+            mkdir -p "$(dirname "$VENV_DIR")"
+            $PYTHON_CMD -m venv "$VENV_DIR"
+            "$VENV_DIR/bin/pip" install --upgrade pip
+        fi
+        "$VENV_DIR/bin/pip" install --upgrade hermes-agent
+        
+        # Create symlink so hermes is available in PATH
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$VENV_DIR/bin/hermes" "$HOME/.local/bin/hermes"
+        
+        # Add to PATH if not already there
+        if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
+    else
+        $PYTHON_CMD -m pip install --upgrade hermes-agent
     fi
-    $PYTHON_CMD -m pip install $PIP_OPTS --upgrade hermes-agent
+    
     if [ $? -eq 0 ]; then
         success "Hermes Agent installed successfully"
     else
@@ -234,9 +255,13 @@ install_llamacpp() {
         fi
     fi
 
-    # Fall back to pip installation
+    # Fall back to pip installation (use venv on Linux to avoid PEP 668)
     info "Installing llama.cpp via pip..."
-    $PYTHON_CMD -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    if [ "$IS_LINUX" = "1" ] && [ -d "${HOME}/.hermes/venv" ]; then
+        "${HOME}/.hermes/venv/bin/pip" install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    else
+        $PYTHON_CMD -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+    fi
     success "llama.cpp installed"
 }
 
