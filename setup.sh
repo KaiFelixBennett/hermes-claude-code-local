@@ -20,6 +20,8 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 ###############################################################################
 # Detect platform
 ###############################################################################
+IS_LINUX=0
+IS_MACOS=0
 PLATFORM="$(uname -s)"
 case "$PLATFORM" in
     Linux)   IS_LINUX=1 ;;
@@ -54,7 +56,7 @@ check_prerequisites() {
     fi
 
     # Disk space check
-    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
     AVAIL_DISK=$(df -BG "$REPO_DIR" | awk 'NR==2 {print $4}' | tr -d 'G')
     if [ "$AVAIL_DISK" -lt 10 ]; then
         warn "Available disk space: ${AVAIL_DISK} GB. At least 10 GB recommended."
@@ -93,7 +95,11 @@ install_hermes() {
     fi
 
     info "Installing Hermes Agent via pip..."
-    $PYTHON_CMD -m pip install --upgrade hermes-agent
+    PIP_OPTS=""
+    if [ "$IS_LINUX" = "1" ]; then
+        PIP_OPTS="--break-system-packages --ignore-installed"
+    fi
+    $PYTHON_CMD -m pip install $PIP_OPTS --upgrade hermes-agent
     if [ $? -eq 0 ]; then
         success "Hermes Agent installed successfully"
     else
@@ -289,7 +295,7 @@ start_services() {
 # Main
 ###############################################################################
 main() {
-    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 
     echo ""
     echo "╔══════════════════════════════════════════╗"
