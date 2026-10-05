@@ -297,6 +297,8 @@ configure_model() {
             # macOS Terminal inserts when a file is dragged into it.
             MODEL_PATH="$(printf '%s' "$MODEL_PATH" \
                 | sed -e "s/^[\"']//" -e "s/[\"']\$//" -e 's/\\ / /g')"
+            # The tilde is matched literally on purpose: read does not expand it.
+            # shellcheck disable=SC2088
             case "$MODEL_PATH" in
                 "~/"*) MODEL_PATH="${HOME}/${MODEL_PATH#"~/"}" ;;
             esac

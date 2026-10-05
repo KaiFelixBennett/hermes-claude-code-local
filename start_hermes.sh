@@ -26,7 +26,8 @@ echo ""
 
 # --- 1) Check / start llama.cpp ---
 echo "[1/2] Checking llama.cpp at ${BASE_URL} ..."
-if curl -s --connect-timeout 3 "${BASE_URL}/models" > /dev/null 2>&1; then
+# -f: a server that is still loading the model answers 503, not ready yet.
+if curl -sf --connect-timeout 3 "${BASE_URL}/models" > /dev/null 2>&1; then
     echo "  OK (already running)"
 else
     echo "  Not running. Starting llama-server..."
@@ -38,9 +39,9 @@ else
     bash "${SCRIPT_DIR}/start_llamacpp.sh" &
     LLAMA_PID=$!
 
-    echo "  Waiting for llama-server to be ready (up to 60s)..."
-    for i in $(seq 1 30); do
-        if curl -s --connect-timeout 1 "${BASE_URL}/models" > /dev/null 2>&1; then
+    echo "  Waiting for llama-server to load the model (up to 5 min)..."
+    for i in $(seq 1 150); do
+        if curl -sf --connect-timeout 1 "${BASE_URL}/models" > /dev/null 2>&1; then
             echo "  llama-server ready."
             break
         fi
@@ -49,8 +50,8 @@ else
             exit 1
         fi
         sleep 2
-        if [ "$i" -eq 30 ]; then
-            echo "[ERROR] llama-server did not become ready within 60s."
+        if [ "$i" -eq 150 ]; then
+            echo "[ERROR] llama-server did not become ready within 5 minutes."
             exit 1
         fi
     done

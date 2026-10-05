@@ -8,6 +8,8 @@ on:
     paths:
       - setup.sh
       - start_llamacpp.sh
+      - start_hermes.sh
+      - hermes_launch.sh
       - Makefile
       - hermes_config.yaml
       - .github/workflows/setup.yml
@@ -15,6 +17,8 @@ on:
     paths:
       - setup.sh
       - start_llamacpp.sh
+      - start_hermes.sh
+      - hermes_launch.sh
       - Makefile
       - hermes_config.yaml
       - .github/workflows/setup.yml
@@ -38,7 +42,7 @@ jobs:
 
       - name: Lint shell scripts
         if: runner.os == 'Linux'
-        run: shellcheck -S warning setup.sh start_llamacpp.sh
+        run: shellcheck -S warning setup.sh start_llamacpp.sh start_hermes.sh hermes_launch.sh
 
       - name: Download a tiny test model
         run: curl -fsSL -o "$RUNNER_TEMP/tiny.gguf" "$TINY_MODEL_URL"

@@ -42,7 +42,11 @@ This repo wires [Hermes Agent](https://hermes-agent.nousresearch.com/) directly 
 curl -fsSL https://raw.githubusercontent.com/KaiFelixBennett/hermes-claude-code-local/main/setup.sh | bash
 ```
 
-**That's it.** The setup script verifies your environment, configures Hermes with llama.cpp, and launches everything in one command.
+**That's it.** On Windows the setup configures Hermes with llama.cpp and launches everything. On Linux and macOS it clones this repo to `~/hermes-claude-code-local`, installs Hermes Agent and llama.cpp (Metal on Apple Silicon, Vulkan or CPU on Linux), downloads the model if you have none and points Hermes at the local server. Then start it:
+
+```bash
+cd ~/hermes-claude-code-local && make start
+```
 
 ---
 
@@ -127,18 +131,21 @@ Use this repo if you want one of these outcomes:
 | OS | Windows 10/11 (WSL2) or Linux/macOS | Windows 11 + WSL2 Ubuntu |
 | RAM | 16 GB | 32 GB |
 | Disk | ~10 GB for model + tools | SSD |
-| GPU | **Strongly recommended** | AMD Radeon (ROCm/HIP) or NVIDIA (CUDA) |
+| GPU | **Strongly recommended** | AMD Radeon (ROCm/HIP or Vulkan), NVIDIA (CUDA or Vulkan) or Apple Silicon (Metal) |
 
-> **On GPU:** For the Qwen3.6-27B Q4_K_M model used here, plan for **24+ GB VRAM** — the model weights alone are ~14.5 GB, and the KV cache at 64k context adds several GB on top. 16 GB VRAM will be tight or require CPU offload (noticeably slower). CPU-only works but is very slow for interactive agent loops; consider a 7B Q4 model if GPU is not available.
+> **On GPU:** For the Qwen3.6-27B Q4_K_M model used here, plan for **24+ GB VRAM** (on a Mac: 32+ GB unified memory) — the model file alone is about 17 GB, and the KV cache at 64k context adds several GB on top. 16 GB VRAM will be tight or require CPU offload (noticeably slower). CPU-only works but is very slow for interactive agent loops; consider a 7B Q4 model if GPU is not available.
 
-You should already have:
+On **Windows** you should already have:
 
-- Hermes installed in WSL (Windows) or natively (Linux/macOS)
-- `claude` CLI installed (for the Claude Code bridge path)
+- Hermes installed in WSL
 - a local GGUF model available on disk
-- a working `llama.cpp` binary (or let `setup.sh` install it)
+- a working `llama.cpp` binary
 
-This repo gives you the wiring, launch scripts, and tested configuration. It does not ship model weights or llama.cpp binaries.
+On **Linux and macOS**, `setup.sh` installs Hermes Agent (official installer, it brings its own Python) and a prebuilt llama.cpp, and downloads the model on request. You only need `curl`, `git` and `tar`; on a Mac that means the Xcode Command Line Tools (`xcode-select --install`).
+
+For the Claude Code bridge you also need the `claude` CLI.
+
+This repo gives you the wiring, launch scripts, and tested configuration. It does not ship model weights or llama.cpp binaries; on Linux and macOS the setup downloads them.
 
 ---
 
@@ -154,15 +161,26 @@ This repo gives you the wiring, launch scripts, and tested configuration. It doe
 **Linux / macOS:**
 ```bash
 bash setup.sh
+make start
 ```
 
-What these scripts do:
+What the Windows script does:
 
 1. Verify required local files exist
 2. Check your configured GGUF path in `hermes_config.yaml`
 3. Prompt for a GGUF path if the configured one is missing
 4. Write the new path back to `model.path`
 5. Start the normal Hermes launcher
+
+What `setup.sh` does on Linux and macOS:
+
+1. Install Hermes Agent with the official installer, unless `hermes` is already there
+2. Ask for a GGUF path, or download Qwen3.6-27B Q4_K_M (about 17 GB) when you press Enter
+3. Use `llama-server` if it is installed; otherwise install it with Homebrew (macOS) or download a prebuilt build into `tools/llama.cpp/current`
+4. Write `model.path` and `model.backend` to `hermes_config.yaml`
+5. Copy that file to `~/.hermes/config.yaml`, keeping your previous config as a `.bak` file
+
+It does not start anything. Running it again is safe; it skips what is already in place.
 
 With Claude Code bridge:
 
@@ -171,7 +189,7 @@ With Claude Code bridge:
 ./setup_hermes_local.ps1 -WithClaudeBridge
 
 # Linux / macOS
-bash setup.sh --with-claude-bridge
+make claude-bridge
 ```
 
 Config-only (no launch):
@@ -180,8 +198,8 @@ Config-only (no launch):
 # Windows
 ./setup_hermes_local.ps1 -SkipLaunch
 
-# Linux / macOS
-bash setup.sh --skip-launch
+# Linux / macOS: setup.sh never launches
+bash setup.sh
 ```
 
 ### Option B: Manual Start
@@ -262,7 +280,7 @@ The main config file is `hermes_config.yaml`. The only values you typically need
 | Field | What It Does | Example |
 |-------|-------------|---------|
 | `model.path` | Path to your GGUF model file | `E:\models\qwen3.6.gguf` |
-| `model.backend` | GPU backend for llama.cpp | `hip`, `vulkan`, `cuda`, `cpu` |
+| `model.backend` | GPU backend for llama.cpp | `hip`, `vulkan`, `cuda`, `metal`, `cpu` |
 | `model.binary_dir` | (optional) Pin a specific llama.cpp build | — |
 
 Everything else — Hermes, LiteLLM, Claude Code — is pre-configured and works out of the box.
@@ -289,6 +307,8 @@ Model tuning details are documented in `docs/models/qwen3.6-27b-mtp-gguf-llamacp
 | `start_hermes.bat` | Quick start Hermes + llama.cpp |
 | `start_hermes_claude_local.bat` | Start with Claude Code bridge |
 | `start_llamacpp.ps1` | Starts llama.cpp from repo config |
+| `setup.sh` | Linux/macOS setup: installs Hermes and llama.cpp, writes the config |
+| `start_llamacpp.sh` | Starts llama.cpp from repo config on Linux/macOS |
 | `start_litellm.ps1` | Starts LiteLLM for the Claude bridge |
 | `claude_local.sh` | Local Claude Code entry point (standalone) |
 | `ensure_claude_local_bridge.sh` | On-demand LiteLLM self-healing wrapper |
@@ -319,6 +339,18 @@ Check that your GPU backend matches your hardware in `hermes_config.yaml`:
 - AMD Radeon → set `model.backend: "hip"`
 - NVIDIA → set `model.backend: "cuda"` or `"vulkan"`
 - No GPU → set `model.backend: "cpu"` (slower but works)
+
+### macOS: "No matching distribution found for hermes-agent"
+
+Older versions of `setup.sh` installed Hermes with the system `pip`. `hermes-agent` needs Python 3.11 to 3.13, and the Python 3.9 that ships with macOS finds no version at all ([#5](https://github.com/KaiFelixBennett/hermes-claude-code-local/issues/5)). The current `setup.sh` uses the official Hermes installer, which brings its own Python. Run the one-liner again.
+
+### llama.cpp starts but Hermes gets errors right away
+
+A 27B model takes a while to load, and until then llama.cpp answers `503 Loading model`. `make start` and `start_hermes.sh` wait for that; if you start Hermes by hand, check first:
+
+```bash
+curl -f http://127.0.0.1:8080/v1/models
+```
 
 ### LiteLLM bridge is down
 
