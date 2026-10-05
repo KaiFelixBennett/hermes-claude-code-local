@@ -120,8 +120,10 @@ litellm: ## Start LiteLLM proxy for Claude Code bridge
 ##############################################################################
 stop: stop-llama stop-litellm ## Stop all services
 
-## pkill patterns are written as [l]itellm: the recipe's own shell has the
-## pattern in its command line, and a plain "litellm" killed that shell.
+## pkill patterns match only the processes this Makefile starts, written as
+## [l]itellm so the pattern does not match itself. A plain "litellm" also
+## matched /tmp/hermes-litellm.pid in the recipe's own shell and killed it,
+## and a plain "llama-server" stopped every llama-server of the user.
 
 stop-llama: ## Stop llama.cpp
 	@if [ -f /tmp/hermes-llama.pid ]; then \
@@ -129,7 +131,7 @@ stop-llama: ## Stop llama.cpp
 		rm -f /tmp/hermes-llama.pid; \
 		echo -e "$(GREEN)[OK]$(NC)    llama.cpp stopped"; \
 	else \
-		pkill -f "[l]lama-server" 2>/dev/null || true; \
+		pkill -f "[l]lama-server .*--port 8080" 2>/dev/null || true; \
 		echo -e "$(YELLOW)[WARN]$(NC) No llama.cpp PID file found, tried pkill"; \
 	fi
 
@@ -139,7 +141,7 @@ stop-litellm: ## Stop LiteLLM
 		rm -f /tmp/hermes-litellm.pid; \
 		echo -e "$(GREEN)[OK]$(NC)    LiteLLM stopped"; \
 	else \
-		pkill -f "[l]itellm" 2>/dev/null || true; \
+		pkill -f "[l]itellm --config" 2>/dev/null || true; \
 		echo -e "$(YELLOW)[WARN]$(NC) No LiteLLM PID file found, tried pkill"; \
 	fi
 
