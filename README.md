@@ -5,10 +5,13 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)]()
 [![Hermes Agent](https://img.shields.io/badge/Hermes-Agent-orange)](https://hermes-agent.nousresearch.com/)
 [![Local Inference](https://img.shields.io/badge/Inference-llama.cpp-green)](https://github.com/ggerganov/llama.cpp)
+[![Benchmark](https://img.shields.io/badge/Benchmark-benchmark.securesight.ai-cb7815)](https://benchmark.securesight.ai)
 
 > **A 4-hour autonomous coding session — 7,256,671 tokens — would have cost $94.34 on Claude Opus 4.7. With this stack: $0.**
 
 This repo wires [Hermes Agent](https://hermes-agent.nousresearch.com/) directly to `llama.cpp` and optionally bridges Claude Code through a local LiteLLM proxy — so your agent calls tools, edits files, and runs task loops 100% on your own hardware.
+
+> **Which local model should you run?** [benchmark.securesight.ai](https://benchmark.securesight.ai) compares measured agentic coding runs on AMD hardware, among them the Qwen3.6-27B used here and its successor Qwen3.8-27B: speed, quality of the result, raw logs. Most of the games the models built are playable in the browser. Data and code: [local-ai-amd-benchmark](https://github.com/KaiFelixBennett/local-ai-amd-benchmark).
 
 ---
 
@@ -412,6 +415,7 @@ This project exists because local LLMs are finally good enough to replace cloud 
 - [r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/) — the best community for local model setups
 - [r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/) — for Claude Code users
 - [Hermes Discord](https://hermes-agent.nousresearch.com/docs/) — for Hermes-specific questions
+- [benchmark.securesight.ai](https://benchmark.securesight.ai) — measured agentic coding runs of local models on AMD hardware, with raw logs
 
 
 ---
