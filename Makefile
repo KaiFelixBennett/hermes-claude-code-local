@@ -120,13 +120,16 @@ litellm: ## Start LiteLLM proxy for Claude Code bridge
 ##############################################################################
 stop: stop-llama stop-litellm ## Stop all services
 
+## pkill patterns are written as [l]itellm: the recipe's own shell has the
+## pattern in its command line, and a plain "litellm" killed that shell.
+
 stop-llama: ## Stop llama.cpp
 	@if [ -f /tmp/hermes-llama.pid ]; then \
 		kill $$(cat /tmp/hermes-llama.pid) 2>/dev/null || true; \
 		rm -f /tmp/hermes-llama.pid; \
 		echo -e "$(GREEN)[OK]$(NC)    llama.cpp stopped"; \
 	else \
-		pkill -f "llama-server" 2>/dev/null || true; \
+		pkill -f "[l]lama-server" 2>/dev/null || true; \
 		echo -e "$(YELLOW)[WARN]$(NC) No llama.cpp PID file found, tried pkill"; \
 	fi
 
@@ -136,7 +139,7 @@ stop-litellm: ## Stop LiteLLM
 		rm -f /tmp/hermes-litellm.pid; \
 		echo -e "$(GREEN)[OK]$(NC)    LiteLLM stopped"; \
 	else \
-		pkill -f "litellm" 2>/dev/null || true; \
+		pkill -f "[l]itellm" 2>/dev/null || true; \
 		echo -e "$(YELLOW)[WARN]$(NC) No LiteLLM PID file found, tried pkill"; \
 	fi
 
