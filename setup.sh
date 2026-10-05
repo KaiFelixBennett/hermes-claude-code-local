@@ -23,10 +23,12 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-info()    { echo -e "${CYAN}[SETUP]${NC} $*"; }
-success() { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+# printf, not echo -e: echo -e would read the "\c" in a Windows path such
+# as E:\Coding\... as "stop output here".
+info()    { printf '%b%s\n' "${CYAN}[SETUP]${NC} " "$*"; }
+success() { printf '%b%s\n' "${GREEN}[OK]${NC}    " "$*"; }
+warn()    { printf '%b%s\n' "${YELLOW}[WARN]${NC}  " "$*"; }
+error()   { printf '%b%s\n' "${RED}[ERROR]${NC} " "$*" >&2; }
 
 ###############################################################################
 # Settings
