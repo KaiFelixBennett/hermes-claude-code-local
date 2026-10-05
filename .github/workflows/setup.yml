@@ -1,0 +1,93 @@
+name: setup
+
+# Runs the one-command setup the way the README tells people to, on a fresh
+# macOS (Apple Silicon, bash 3.2) and Ubuntu machine. Issue #5 was a macOS
+# install failure nobody could see from a Windows desk.
+on:
+  push:
+    paths:
+      - setup.sh
+      - start_llamacpp.sh
+      - start_hermes.sh
+      - hermes_launch.sh
+      - Makefile
+      - hermes_config.yaml
+      - .github/workflows/setup.yml
+  pull_request:
+    paths:
+      - setup.sh
+      - start_llamacpp.sh
+      - start_hermes.sh
+      - hermes_launch.sh
+      - Makefile
+      - hermes_config.yaml
+      - .github/workflows/setup.yml
+  workflow_dispatch:
+
+jobs:
+  setup:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      HERMES_SETUP_NONINTERACTIVE: "1"
+      # The real default model is 17 GB; a 47 MB model checks the wiring.
+      TINY_MODEL_URL: https://huggingface.co/ggml-org/tinygemma3-GGUF/resolve/main/tinygemma3-Q8_0.gguf
+      CLONE_DIR: ${{ github.workspace }}/../hermes-clone
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint shell scripts
+        if: runner.os == 'Linux'
+        run: shellcheck -S warning setup.sh start_llamacpp.sh start_hermes.sh hermes_launch.sh
+
+      - name: Download a tiny test model
+        run: curl -fsSL -o "$RUNNER_TEMP/tiny.gguf" "$TINY_MODEL_URL"
+
+      - name: "curl | bash from an empty folder, as the README says"
+        env:
+          HERMES_LOCAL_DIR: ${{ env.CLONE_DIR }}
+          HERMES_LOCAL_REPO: ${{ github.server_url }}/${{ github.repository }}.git
+          HERMES_LOCAL_REF: ${{ github.head_ref || github.ref_name }}
+          # macOS runners have Homebrew; force the download path that
+          # Macs without Homebrew take.
+          HERMES_LLAMACPP_SOURCE: release
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty" && cd "$RUNNER_TEMP/empty"
+          HERMES_SETUP_MODEL="$RUNNER_TEMP/tiny.gguf" bash < "$GITHUB_WORKSPACE/setup.sh"
+
+      - name: Check what setup installed and wrote
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          hermes --version
+          "$CLONE_DIR/tools/llama.cpp/current/llama-server" --version
+          grep -q 'custom:local-llama-cpp' "$HOME/.hermes/config.yaml"
+          grep -q "path: '$RUNNER_TEMP/tiny.gguf'" "$CLONE_DIR/hermes_config.yaml"
+          grep -E '^  backend:' "$CLONE_DIR/hermes_config.yaml"
+
+      - name: Second run inside the clone finds everything in place
+        working-directory: ${{ env.CLONE_DIR }}
+        run: bash setup.sh
+
+      - name: make llama starts the server and it answers
+        working-directory: ${{ env.CLONE_DIR }}
+        env:
+          # CI runners have no usable GPU.
+          HERMES_LLAMACPP_BACKEND: cpu
+          HERMES_LLAMACPP_CONTEXT: "4096"
+        run: |
+          make llama
+          curl -sf http://127.0.0.1:8080/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"Qwen3.6-27B-MTP GGUF","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'
+          echo
+          make stop
+
+      - name: Logs
+        if: always()
+        run: |
+          tail -n 40 /tmp/llama-server.log 2>/dev/null || true
+          tail -n 40 "$HOME/.hermes/logs/install.log" 2>/dev/null || true

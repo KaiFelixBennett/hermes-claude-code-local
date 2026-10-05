@@ -14,6 +14,7 @@ src/
 *.local
 tools/llama.cpp/b*-win-*/
 tools/llama.cpp/llama-b*-bin-win-*.zip
+tools/llama.cpp/current/
 
 # Editor directories and files
 .vscode/*

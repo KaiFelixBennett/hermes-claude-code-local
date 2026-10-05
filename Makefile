@@ -11,6 +11,7 @@ SHELL := /bin/bash
 GREEN  := \033[0;32m
 CYAN   := \033[0;36m
 YELLOW := \033[1;33m
+RED    := \033[0;31m
 NC     := \033[0m
 
 ## Paths
@@ -19,9 +20,13 @@ CONFIG   := $(REPO_DIR)/hermes_config.yaml
 LLAMA_LOG := /tmp/llama-server.log
 LITELLM_LOG := /tmp/hermes-litellm.log
 
-## Extract model config from YAML
-MODEL_PATH := $(shell grep -A1 '^\s*path:' $(CONFIG) 2>/dev/null | head -1 | sed "s/.*path:\s*['\"]*//;s/['\"].*//" | tr -d ' ')
-BACKEND    := $(shell grep -A1 '^\s*backend:' $(CONFIG) 2>/dev/null | head -1 | sed "s/.*backend:\s*['\"]*//;s/['\"].*//" | tr -d ' ')
+## The official Hermes installer links hermes into ~/.local/bin, which a
+## shell opened before setup does not have on PATH yet.
+export PATH := $(HOME)/.local/bin:$(PATH)
+
+## curl -f: llama-server answers 503 while the model is still loading,
+## and that must not count as ready.
+LLAMA_READY := curl -sf http://127.0.0.1:8080/v1/models > /dev/null 2>&1
 
 ##############################################################################
 # Help
@@ -54,41 +59,35 @@ hermes: check-llama ## Start Hermes Agent
 	@hermes || { echo "Hermes not found. Run 'make setup' first."; exit 1; }
 
 check-llama: ## Check if llama.cpp is running
-	@curl -s http://127.0.0.1:8080/v1/models > /dev/null 2>&1 || { \
+	@$(LLAMA_READY) || { \
 		echo -e "$(YELLOW)[WARN]$(NC) llama.cpp not reachable at port 8080"; \
 		echo "     Starting llama.cpp first..."; \
-		$(MAKE) llama-wait; \
+		$(MAKE) llama; \
 	}
 
 llama: ## Start llama.cpp server
-	@if curl -s http://127.0.0.1:8080/v1/models > /dev/null 2>&1; then \
+	@if $(LLAMA_READY); then \
 		echo -e "$(GREEN)[OK]$(NC)    llama.cpp is already running"; \
 	else \
-		echo -e "$(CYAN)[LLAMA]$(NC) Starting llama.cpp server..."; \
-		if command -v llama-server > /dev/null 2>&1; then \
-			llama-server \
-				--model "$(MODEL_PATH)" \
-				--host 127.0.0.1 \
-				--port 8080 \
-				--ctx-size 65536 \
-				--threads $$(nproc 2>/dev/null || echo 4) \
-				> $(LLAMA_LOG) 2>&1 & \
-			echo $$! > /tmp/hermes-llama.pid; \
-		else \
-			echo "llama-server not found. Run 'make setup' first."; \
-			exit 1; \
-		fi; \
+		echo -e "$(CYAN)[LLAMA]$(NC) Starting llama.cpp server (log: $(LLAMA_LOG))..."; \
+		bash $(REPO_DIR)/start_llamacpp.sh > $(LLAMA_LOG) 2>&1 & \
+		echo $$! > /tmp/hermes-llama.pid; \
 		$(MAKE) llama-wait; \
 	fi
 
-llama-wait: ## Wait for llama.cpp to be ready
-	@for i in $$(seq 1 30); do \
-		if curl -s http://127.0.0.1:8080/v1/models > /dev/null 2>&1; then \
+llama-wait: ## Wait for llama.cpp to be ready (a 27B model takes a while to load)
+	@for i in $$(seq 1 150); do \
+		if $(LLAMA_READY); then \
 			echo -e "$(GREEN)[OK]$(NC)    llama.cpp is ready"; \
 			break; \
 		fi; \
-		if [ $$i -eq 30 ]; then \
-			echo -e "$(RED)[ERROR]$(NC) llama.cpp failed to start. Check $(LLAMA_LOG)"; \
+		if [ -f /tmp/hermes-llama.pid ] && ! kill -0 $$(cat /tmp/hermes-llama.pid) 2>/dev/null; then \
+			echo -e "$(RED)[ERROR]$(NC) llama.cpp exited. Last lines of $(LLAMA_LOG):"; \
+			tail -n 15 $(LLAMA_LOG); \
+			exit 1; \
+		fi; \
+		if [ $$i -eq 150 ]; then \
+			echo -e "$(RED)[ERROR]$(NC) llama.cpp not ready after 5 minutes. Check $(LLAMA_LOG)"; \
 			exit 1; \
 		fi; \
 		sleep 2; \
@@ -121,13 +120,18 @@ litellm: ## Start LiteLLM proxy for Claude Code bridge
 ##############################################################################
 stop: stop-llama stop-litellm ## Stop all services
 
+## pkill patterns match only the processes this Makefile starts, written as
+## [l]itellm so the pattern does not match itself. A plain "litellm" also
+## matched /tmp/hermes-litellm.pid in the recipe's own shell and killed it,
+## and a plain "llama-server" stopped every llama-server of the user.
+
 stop-llama: ## Stop llama.cpp
 	@if [ -f /tmp/hermes-llama.pid ]; then \
 		kill $$(cat /tmp/hermes-llama.pid) 2>/dev/null || true; \
 		rm -f /tmp/hermes-llama.pid; \
 		echo -e "$(GREEN)[OK]$(NC)    llama.cpp stopped"; \
 	else \
-		pkill -f "llama-server" 2>/dev/null || true; \
+		pkill -f "[l]lama-server .*--port 8080" 2>/dev/null || true; \
 		echo -e "$(YELLOW)[WARN]$(NC) No llama.cpp PID file found, tried pkill"; \
 	fi
 
@@ -137,7 +141,7 @@ stop-litellm: ## Stop LiteLLM
 		rm -f /tmp/hermes-litellm.pid; \
 		echo -e "$(GREEN)[OK]$(NC)    LiteLLM stopped"; \
 	else \
-		pkill -f "litellm" 2>/dev/null || true; \
+		pkill -f "[l]itellm --config" 2>/dev/null || true; \
 		echo -e "$(YELLOW)[WARN]$(NC) No LiteLLM PID file found, tried pkill"; \
 	fi
 
@@ -149,7 +153,7 @@ status: ## Show service status
 	@echo -e "$(CYAN)Service Status$(NC)"
 	@echo "─────────────"
 	@echo -n "  llama.cpp:     "
-	@if curl -s http://127.0.0.1:8080/v1/models > /dev/null 2>&1; then \
+	@if $(LLAMA_READY); then \
 		echo -e "$(GREEN)running$(NC)"; \
 	else \
 		echo -e "$(YELLOW)not running$(NC)"; \

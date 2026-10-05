@@ -7,7 +7,9 @@
 
 set -e
 
-CONFIG="/root/.hermes/config.yaml"
+# ~/.hermes is /root/.hermes for the root user in WSL, as before.
+HERMES_DIR="${HERMES_HOME:-$HOME/.hermes}"
+CONFIG="${HERMES_DIR}/config.yaml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_CONFIG="${HERMES_LOCAL_CONFIG:-${SCRIPT_DIR}/hermes_config.yaml}"
 
@@ -85,7 +87,8 @@ fi
 API_BASE_URL="${API_BASE_URL%/}"
 
 echo -n "llama.cpp check (${API_BASE_URL}): "
-if curl -s --connect-timeout 3 "${API_BASE_URL}/models" > /dev/null 2>&1; then
+# -f: a server that is still loading the model answers 503.
+if curl -sf --connect-timeout 3 "${API_BASE_URL}/models" > /dev/null 2>&1; then
     echo "OK"
 else
     echo "UNREACHABLE"
@@ -106,6 +109,12 @@ echo ""
 
 configure_claude_code_bridge
 
-cd /root/.hermes/hermes-agent
-source venv/bin/activate
+# Older WSL setups run Hermes from the venv of a source checkout. The
+# official installer puts hermes on PATH in ~/.local/bin instead.
+if [ -f "${HERMES_DIR}/hermes-agent/venv/bin/activate" ]; then
+    cd "${HERMES_DIR}/hermes-agent"
+    # shellcheck disable=SC1091
+    source venv/bin/activate
+fi
+export PATH="$HOME/.local/bin:$PATH"
 exec hermes
